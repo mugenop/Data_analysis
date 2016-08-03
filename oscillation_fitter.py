@@ -31,6 +31,21 @@ DELTA_T = 0.1
 COUNTER = 0
 
 
+def linear_extrapolate(dict_1,dict_2,step):
+    dict_final = {}
+    array = dict_1['time']
+    array_beg = dict_1['time'][-1]
+    array_end = dict_2['time'][0]
+    array = np.arange(array_beg, array_end, step)
+    size_array = array.size+1
+    for el in dict_1.keys():
+        array_beg = dict_1[el][-1]
+        array_end = dict_2[el][0]
+        array= np.linspace(array_beg,array_end,size_array)
+        new_array = np.concatenate((array,dict_2[el][1:]),axis=0)
+        dict_final[el] = new_array
+
+
 def iso_writer(rootfolder, list_fit):
     wfile = open(rootfolder + "isotropic_fit_output" + '.txt', "w")
     wfile.writelines("Experiment_name\tSlope\tOffset\t")
@@ -309,12 +324,42 @@ def far_field(filename, time_cut, v0, yg0,ly0, rho, k, g=9.81,mass=0,manip_name=
     plot_double(time, volume_array_normalized, v_th, "Experimental", "Fit", image_name + "_Volume.png","Volume fit","Time(s)","V(m^3)",ylim =Vlim,show_flag=True,xlim=None)
     plot_double(time, R,R_th, "Experimental", "Fit", image_name + "_R.png","Radius fit","Time(s)","R(m)",ylim=Rlim,show_flag=True,xlim=None)
     plot_double(time, yg, yg_th, "Experimental", "Fit", image_name + "_far_field_fit.png","Yg far field fit","Time(s)","Yg(m)",ylim=ylim,show_flag=True)
-    # plot_unique(time,yg,'bidouille.png','Yg complet','k-','Yg complet','Temps (s)','Yg (m)',show_flag=True)
-    # plot_double(time, equilibrium_array, equilibrium_array_th_2, "Experimental", "Fit", image_name + "_Equilibrium_fitted.png","/Sigma Forces fitted","Time(s)","quantite bastardo(N)",ylim = None,show_flag=True)
-    #
 
     plt.title("Far field fit")
     return volume_params,R_params,far_field_param
+
+
+def buckling(filename, time_cuts,step,params, v0, yg0,ly0, rho, k, g=9.81,mass=0,manip_name="manip",filter=False):
+    time_cut_uphill = time_cuts[0]
+    time_cut_downhill = time_cuts[1]
+
+    results_dict_uphill = read_results_file(filename, time_cut_uphill)
+    results_dict_downhill = read_results_file(filename, time_cut_downhill)
+    results_dict = linear_extrapolate(results_dict_uphill,results_dict_downhill,step)
+    time = results_dict["time"]
+    volume_array_normalized = results_dict['External_volume'] - v0
+    yl = results_dict['Ylow'] - ly0
+    yg = -results_dict['Gravity_Y'] + yg0
+
+    if filter:
+        FILTER_WIN = 11
+        print 'filtering\n'
+        yl=filterer(yl,FILTER_WIN,3,1)
+        yl = yl[0]
+        volume_array_normalized=filterer(volume_array_normalized,FILTER_WIN,3,1)
+        volume_array_normalized=volume_array_normalized[0]
+        yg=filterer(yg,FILTER_WIN,3,delta=step)
+        yg=yg[0]
+        ygp=yg[1]
+        ygpp=yg[2]
+    lambda_exp =  params['lamda']
+    mass = params['massTot']
+    k = params['k']
+    alpha = lambda_exp*2*mass
+    buckling_force = mass*ygpp+alpha*ygp+k*yl-rho*g*volume_array_normalized
+    plt.plot(time,buckling_force)
+    plt.show()
+
 
 
 def rolling(filename):
@@ -355,7 +400,7 @@ def free_oscillation(file, rho, k, mass, R=0.025):
     return Fv_array, V_array
 
 
-def manip_analyser(rootfolder, nbrOfExperiments, rho, mass=0, free_oscillation_flag=False,filter = False):
+def manip_analyser(rootfolder, nbrOfExperiments, rho,step=0.0002, mass=0, free_oscillation_flag=False,filter = False):
     if not free_oscillation_flag:
         subfolder = rootfolder + "Isotropic_B\\"
         file_list = os.listdir(subfolder)
@@ -398,7 +443,12 @@ def manip_analyser(rootfolder, nbrOfExperiments, rho, mass=0, free_oscillation_f
             V_list.append(v.valuesdict())
             R_list.append(r.valuesdict())
             far_field_list.append(y.valuesdict())
-
+        for i in xrange(0, nbrOfExperiments[0]):
+            buckling(subfolder + textfile_list[i], (timStartArrayRealbuckling[i],timStartArraybuckling[i]),step, far_field_list[i],ext_V_reference[i], Yg_reference[i],ly_reference[i], rho,
+                     k, manip_name=textfile_list[i].split(".t")[0],mass=mass,filter= filter)
+            V_list.append(v.valuesdict())
+            R_list.append(r.valuesdict())
+            far_field_list.append(y.valuesdict())
         parameters_writer(rootfolder+"Volume_fit.txt",V_list)
         parameters_writer(rootfolder+"R_fit.txt",R_list)
         parameters_writer(rootfolder+"Yg_fit.txt",far_field_list)
@@ -451,7 +501,9 @@ if __name__ == "__main__":
     ly_reference = [5.10853e-02, 5.10960e-02, 5.12694e-02, 5.10834e-02, 5.10834e-02]
     ext_V_reference = [6.54484e-05, 6.54422e-05, 6.54462e-05, 6.54477e-05, 6.54480e-05]
     timeStartbuckling = [1520, 1120, 173, 1921, 535]
+    timeStartRealbuckling = [1505, 1100, 155, 1901, 520]
     timStartArraybuckling = np.array(timeStartbuckling) * 0.0002
+    timStartArrayRealbuckling = np.array(timeStartRealbuckling)*0.0002
     mass_ball = [0.017, 0.034, 0.042]
     # #2
     # ly_reference = [5.24448e-02,5.22848e-02,5.27078e-02,5.27705e-02,5.28126e-02]
@@ -466,7 +518,7 @@ if __name__ == "__main__":
     # timeStartbuckling = [1670, 1780, 1555, 1100, 1840]
     # timStartArraybuckling = np.array(timeStartbuckling) * 0.0002
 
-    filename = 'D:\\Documents\\Footage\\videos\\Manip_finales\\Glycerol_100\\Ressort\\5_25\\output_general\\'
+    filename = 'C:/Users/Mugen/Documents/5_25/output_general/'
     m=mass_ball[1]
     # filename = 'D:\\Documents\\Footage\\videos\\Manip_finales\\Glycerol_100\\Ressort\\Oscillations_libres\\'
     print filename
